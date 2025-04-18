@@ -313,14 +313,7 @@ async def chat_completions(body: ChatBody, request: Request):
         max_output_tokens=max_output_tokens
     )
 
-    # for message in body.messages: # History population removed
-    #     ...
 
-    # --- REMOVED: ConversationChain creation ---
-    # conversation = ConversationChain(llm=llm, memory=memory)
-
-    # Get Vertex AI output by calling the LLM directly with the latest question
-    # This treats each request as a new, stateless prompt
     try:
         answer = llm.predict(question)
     except Exception as e:
@@ -346,9 +339,6 @@ async def chat_completions(body: ChatBody, request: Request):
                 generate_stream_response_start(),
                 ensure_ascii=False
             )
-            # In a true streaming scenario, you would stream chunks from the LLM.
-            # Since llm.predict() returns the full answer at once,
-            # we yield it as a single content chunk.
             yield json.dumps(
                 generate_stream_response(answer),
                 ensure_ascii=False
