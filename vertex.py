@@ -18,7 +18,6 @@ import json
 import os
 import secrets
 import time
-import datetime
 import uvicorn
 
 # FastAPI
@@ -36,9 +35,6 @@ from google.cloud import aiplatform
 # LangChain
 import langchain
 from langchain_community.chat_models import ChatVertexAI
-from langchain.chains import ConversationChain
-from langchain.memory import ConversationBufferMemory
-
 # Google authentication
 credentials, project_id = google.auth.default()
 
@@ -262,18 +258,26 @@ async def chat_completions(body: ChatBody, request: Request):
     """
 
     # Authorization via OPENAI_API_KEY
-    if request.headers.get("Authorization").split(" ")[1] != api_key:
+    # Check if the Authorization header exists and has the Bearer scheme
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authorization header missing or incorrect format")
+
+    auth_token = auth_header.split(" ")[1]
+    if auth_token != api_key:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "API key is wrong!")
 
     if debug:
         print(f"body = {body}")
 
     # Get user question
-    question = body.messages[-1]
-    if question.role == 'user' or question.role == 'assistant':
-        question = question.content
-    else:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No Question Found")
+    question = ""
+    # Find the last user message
+    for message in reversed(body.messages):
+        if message.role == 'user':
+            question = message.content
+    if not question:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No user question found in messages.")
 
     # Overwrite defaults
     temperature = float(body.temperature or default_temperature)
@@ -309,35 +313,21 @@ async def chat_completions(body: ChatBody, request: Request):
         max_output_tokens=max_output_tokens
     )
 
-    # Buffer for storing conversation memory
-    # Note: Max input token:
-    # - chat-bison: 4096
-    # - codechat-bison: 6144
-    memory = ConversationBufferMemory(
-        memory_key="history",
-        max_token_limit=2048,
-        return_messages=True
-    )
-    # Today
-    memory.chat_memory.add_user_message("What day is today?")
-    memory.chat_memory.add_ai_message(
-        datetime.date.today().strftime("Today is %A, %B %d, %Y")
-    )
-    # Add history
-    for message in body.messages:
-        # if message.role == 'system':
-        #     system_prompt = message.content
-        if message.role == 'user':
-            memory.chat_memory.add_user_message(message.content)
-        elif message.role == 'assistant':
-            memory.chat_memory.add_ai_message(message.content)
+    # for message in body.messages: # History population removed
+    #     ...
 
-    # Get Vertex AI output
-    conversation = ConversationChain(
-        llm=llm,
-        memory=memory,
-    )
-    answer = conversation.predict(input=question)
+    # --- REMOVED: ConversationChain creation ---
+    # conversation = ConversationChain(llm=llm, memory=memory)
+
+    # Get Vertex AI output by calling the LLM directly with the latest question
+    # This treats each request as a new, stateless prompt
+    try:
+        answer = llm.predict(question)
+    except Exception as e:
+        # Handle potential errors during prediction (e.g., model issues, quotas)
+        print(f"Error during LLM prediction: {e}")
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Error generating response from model: {e}")
+
 
     if debug:
         print(f"stream = {body.stream}")
@@ -346,7 +336,8 @@ async def chat_completions(body: ChatBody, request: Request):
         print(f"top_k = {top_k}")
         print(f"top_p = {top_p}")
         print(f"max_output_tokens = {max_output_tokens}")
-        print(f"history = {memory.buffer}")
+        print(f"Prompt (last user message): {question}")
+        print(f"Raw Answer from LLM: {answer}")
 
     # Return output
     if body.stream:
@@ -355,6 +346,9 @@ async def chat_completions(body: ChatBody, request: Request):
                 generate_stream_response_start(),
                 ensure_ascii=False
             )
+            # In a true streaming scenario, you would stream chunks from the LLM.
+            # Since llm.predict() returns the full answer at once,
+            # we yield it as a single content chunk.
             yield json.dumps(
                 generate_stream_response(answer),
                 ensure_ascii=False
