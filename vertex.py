@@ -295,14 +295,14 @@ async def chat_completions(body: ChatBody, request: Request):
     if model_name == 'codechat-bison':
         if max_output_tokens > 2048:
             max_output_tokens = 2048
-    elif model_name.find("gemini-pro"):
-        if max_output_tokens > 8192:
-            max_output_tokens = 8192
+    elif model_name.find("gemini-2.5"):
+        if max_output_tokens > 64000:
+            max_output_tokens = 64000
     elif model_name.find("32k"):
         if max_output_tokens > 16000:
             max_output_tokens = 16000
-    elif max_output_tokens > 1024:
-        max_output_tokens = 1024
+    elif max_output_tokens > 8192:
+        max_output_tokens = 8192
 
     # Wrapper around Vertex AI large language models
     llm = ChatVertexAI(
